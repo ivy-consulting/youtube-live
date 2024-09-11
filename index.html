@@ -282,6 +282,8 @@
         const maxVisibleComments = 6; // Maximum number of visible comments
         let commentQueue = []; // Queue for comments that need audio responses
         let isProcessingAudio = false; // Flag to indicate if audio is being processed
+        let introducedUsers = new Set(); // Set to keep track of introduced users
+        let idleInterval; // Interval to handle idle talking
 
         // Function to add comments to the box
         function addCommentToBox(commentText) {
@@ -299,35 +301,31 @@
             }
         }
 
-        // Function to handle incoming comments from the server
-        function handleNewComment(author, message) {
-            // Add the comment to the chat box
+        // will queue the comment and process it when the audio is done
+        function handleNewComment(author, message, status) {
+            // Queue the comment
             addCommentToBox(`${author}: ${message}`);
-
-            // Decide if we want to generate audio for this comment
-            // Example: Generate audio for every 5th comment
-            if (commentQueue.length % 5 === 0) {
-                commentQueue.push({ author, message });
-                processAudioQueue(); // Start processing the queue if not already processing
-            }
+            commentQueue.push({ author, message, status });
+            processAudioQueue(); // Start processing the queue if not already processing
         }
 
         const chatbotApiUrl = "http://18.176.84.155:5000/live";
         const speechApiUrl = "http://13.114.188.215:5000/voice";
 
-        async function getChatbotResponse(comment, username) {
+        // get a response for comments from the chatbot
+        async function getChatbotResponse(comment, username, id) {
             const payload = {
                 body: {
-                    event_id: 1,
+                    event_id: id,
                     game_id: null,
-                    character_name: "saionji",
+                    character_name: "nekohime",
                     username: username,
-                    userid: 662,
+                    userid: "Live",
                     comment: comment,
                     giftid: null,
                     gender: "male",
                     embedding: null,
-                    language: "English"
+                    language: "Japanese"
                 }
             };
 
@@ -340,8 +338,11 @@
 
                 if (response.ok) {
                     const responseData = await response.json();
-                    console.log(responseData, comment, username)
-                    return responseData.body?.text || 'No response from chatbot';
+                    console.log("response data from the chatbot:",  responseData, comment, username)
+                    return {
+                        text: responseData.body?.text || 'No response from chatbot',
+                        emotion: responseData.body?.EmotionalB || responseData.body?.EmotionalA || "3" // Replace EmotionalB with the actual key
+                    };
                 } else {
                     console.error(`Chatbot request failed with status: ${response.status}`);
                     return null;
@@ -352,19 +353,73 @@
             }
         }
 
+        // Play the intro audio for new users
+        async function playIntroAudio() {
+            const introAudioUrl = 'intro.wav'; // Replace with the actual path to the intro audio file
+
+            try {
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const response = await fetch(introAudioUrl);
+                const audioData = await response.arrayBuffer();
+                const buffer = await audioContext.decodeAudioData(audioData);
+                const source = audioContext.createBufferSource();
+                source.buffer = buffer;
+                source.connect(audioContext.destination);
+                source.start(0);
+                simulateSpeaking();
+                
+
+                console.log('Intro audio playing for new user.');
+
+                // Ensure no overlap by waiting for the audio to finish before proceeding
+                return new Promise(resolve => {
+                    source.onended = () => {
+                        stopMouthAnimation();
+                        console.log('Intro audio finished.');
+                        resolve();
+                    };
+                });
+            } catch (error) {
+                console.error('Error playing intro audio:', error);
+            }
+        }
 
 
+        // Process the audio queue
         async function processAudioQueue() {
             if (isProcessingAudio || commentQueue.length === 0) return;
 
             isProcessingAudio = true;
-            const { author, message } = commentQueue.shift(); // Get the next comment to process
+            const { author, message, status } = commentQueue.shift(); // Get the next comment to process
 
             try {
-                // Fetch chatbot response
-                const chatbotResponse = await getChatbotResponse(message, author);
+                let { text: chatbotResponse, emotion: emotionText } = await getChatbotResponse(message, author, 1);
+
+                const currentEmotion = {
+                    1: 'happy',      // Very happy
+                    2: 'relaxed',    // Happy
+                    3: 'neutral',    // Normal
+                    4: 'angry',      // Slightly confused
+                    5: 'sorrow'         // Sad
+                };
+
+                applyEmotion(currentEmotion[emotionText]);
+                console.log("emotion, ", currentEmotion[emotionText])
+                // Now you can use chatbotResponse and emotion
+                console.log(`Chatbot response: ${chatbotResponse}`);
+                // console.log(`Emotion: ${emotionText}`);
+
+                // Check if the user is new
+                if (!introducedUsers.has(author)) {
+                    // let introResponse = "失敗しても諦めにゃい！ドジっ子VTuber、猫姫ネロだにゃんっ！ ";
+                    // Play the intro audio for new users
+                    await playIntroAudio();
+
+                    introducedUsers.add(author); // Mark the user as introduced
+                }
+
+
                 if (chatbotResponse) {
-                    // Generate speech based on chatbot response
                     await generateSpeech(chatbotResponse);
                 }
             } catch (error) {
@@ -372,17 +427,134 @@
             }
         }
 
+        
+
+
+
+        // Function to start idle talking at regular intervals
+        // function startIdleTalking() {
+        //     console.log("Applying happy emotion");
+
+        //     idleInterval = setInterval(async () => {
+        //         if (commentQueue.length === 0 && !isProcessingAudio) {
+        //             try {
+        //                 // Set flag to avoid overlapping messages
+        //                 isProcessingAudio = true;
+
+        //                 // Fetch idle message from the chatbot response
+        //                 const idleComment = "";  // Identifier for idle messages
+        //                 const username = ""; // Default username for idle mode
+
+        //                 let { text: idleMessage } = await getChatbotResponse(idleComment, username, 4);
+
+        //                 if (idleMessage) {
+        //                     console.log(`Idle message from chatbot: ${idleMessage}`);
+        //                     await generateSpeech(idleMessage);
+        //                 } else {
+        //                     console.error("No idle message received from the chatbot.");
+        //                 }
+
+        //                 // Reset flag after the speech finishes
+        //                 isProcessingAudio = false;
+
+        //             } catch (error) {
+        //                 console.error("Error fetching idle message from chatbot:", error);
+        //                 isProcessingAudio = false; // Ensure flag is reset on error
+        //             }
+        //         }
+        //     }, 11000); // Adjust the interval as needed
+        // }
+
+
+        // // Call this to start the idle talking when the app starts
+        // startIdleTalking();
+
+        // Idle talking functionality
+        function startIdleTalking() {
+            
+            console.log("aplying happy emotion")
+            idleInterval = setInterval(async () => {
+                if (commentQueue.length === 0 && !isProcessingAudio) {
+                    const idleMessages = [
+                        "私はまだここにいるよ",
+                        "コメント待ってるね！",
+                        "恥ずかしがらないで",
+                        "チャットしようよ！",
+                        "いつでもチャットしに来てね！",
+                        "何でも気軽に聞いてね！"
+                    ];
+                    const randomMessage = idleMessages[Math.floor(Math.random() * idleMessages.length)];
+                    await generateSpeech(randomMessage);
+                }
+            }, 11000); // Adjust the interval as needed (e.g., every 30 seconds)
+        }
+
+        // Call this to start the idle talking when the app starts
+        
+        
+        
+        startIdleTalking();
+
+        // playIntroAudio();
+        let isSpeaking = false;
+
+        // Make sure to clear the interval when the app stops, if necessary
+        window.addEventListener('beforeunload', () => {
+            clearInterval(idleInterval);
+        });
+
+
+        // Function to clear the current emotion and set it to neutral
+        function clearEmotion() {
+            if (!currentVrm || !currentVrm.expressionManager) {
+                console.error("VRM or expression manager is not loaded.");
+                return;
+            }
+
+            // Log message indicating that we're clearing the current emotion
+            console.log("Clearing current emotion");
+
+            // Reset all expressions explicitly to 0 instead of null
+            Object.keys(currentVrm.expressionManager.expressions).forEach(expressionName => {
+                if (currentVrm.expressionManager.getValue(expressionName) !== 0) {
+                    currentVrm.expressionManager.setValue(expressionName, 0); // Set all expressions to 0
+                }
+            });
+
+            // Force update to apply the reset changes
+            currentVrm.expressionManager.update();
+
+            // Verify the reset state by logging the current values of all expressions
+            Object.keys(currentVrm.expressionManager.expressions).forEach(expressionName => {
+                const currentValue = currentVrm.expressionManager.getValue(expressionName);
+            });
+
+            // Optionally, set the VRM model back to a neutral state
+            currentVrm.expressionManager.setValue("sad", 0);
+            currentVrm.expressionManager.setValue("happy", 0);
+            currentVrm.expressionManager.setValue("relaxed", 0);
+            currentVrm.expressionManager.setValue("sad", 0);
+            currentVrm.expressionManager.setValue("angry", 0);
+            currentVrm.expressionManager.setValue('neutral', 1); // 'neutral' can be changed to a suitable expression if available.
+            currentVrm.expressionManager.update();
+
+            console.log("Emotion cleared and set to neutral state.");
+        }
+
+
+
+        // Function to generate speech from text using the speech API
         async function generateSpeech(text) {
             const params = {
                 text: text,
-                model_id: 8,
-                speaker_name: "A",
+                model_id: 12,
+                speaker_name: "A-amazinGood",
                 speaker_id: 0,
                 sdp_ratio: 0.2,
                 noise: 0.6,
                 noisew: 0.8,
                 length: 1,
-                language: "EN",
+                language: "JP",
                 auto_split: "true",
                 split_interval: 0.5,
                 assist_text_weight: 1,
@@ -402,6 +574,11 @@
                     const audioData = await response.arrayBuffer();
                     console.log("Speech generated successfully. Playing audio...");
 
+                    applyTalkingEmotion();  // Apply an initial talking emotion
+
+                    // Start switching emotions periodically during speech
+                    switchEmotionsDuringSpeech();
+
                     // Convert the audio data to a playable format
                     const audioContext = new (window.AudioContext || window.webkitAudioContext)();
                     const buffer = await audioContext.decodeAudioData(audioData);
@@ -410,10 +587,22 @@
                     source.connect(audioContext.destination);
                     source.start(0);
 
-                    // Ensure no overlap by waiting until the audio finishes before processing the next
+                    // Start mouth animation
+                    simulateSpeaking();
+
+                    // Stop mouth animation and emotion switching when audio ends
                     source.onended = () => {
+                        stopMouthAnimation();
+                        console.log('Audio finished playing.');
                         isProcessingAudio = false;
                         processAudioQueue(); // Continue processing the queue
+
+                        // Stop switching emotions
+                        stopSwitchingEmotions();
+
+                        // Reset to idle/waiting emotion
+                        clearEmotion();
+                        switchEmotionsDuringWaiting(); // Start switching emotions during waiting
                     };
 
                 } else if (response.status === 405) {
@@ -444,7 +633,7 @@
             sound.setLoop(false);
             sound.setVolume(0.5);
             sound.play();
-
+            
             // When the audio finishes, process the next comment
             sound.onEnded = function() {
                 console.log('Audio finished playing.');
@@ -452,26 +641,30 @@
             };
         }
 
-        // loadAndPlayAudio()
-
         // Initialize EventSource for real-time comments
         function initializeCommentStream() {
             const eventSource = new EventSource('http://localhost:8000/stream-comments-only');
 
             eventSource.onmessage = function(event) {
                 try {
+                    console.log('Raw data received:', event.data); // Log the raw data
                     // Replace single quotes with double quotes to handle JSON format
-                    let formattedData = event.data.replace(/'/g, '"');
+                    let formattedData = event.data
+                        .replace(/(\r\n|\n|\r)/gm, "")  // Remove any line breaks
+                        .replace(/'/g, '"'); 
 
-                    // Parse the JSON data
                     const commentData = JSON.parse(formattedData);
 
                     // Extract author and message
                     const author = commentData.author || 'Anonymous';
-                    const message = commentData.message || '';
+                    const  message = commentData.message || '';
+                    const autherId = commentData.authorId || '';
+                    const status = commentData.status || '';
 
+                
                     // Handle the new comment
-                    handleNewComment(author, message);
+
+                    handleNewComment(author, message, status);
                     
                 } catch (error) {
                     console.error('Error processing comment data:', error);
@@ -489,6 +682,71 @@
 
 
 
+        // Arrays to store multiple animations for each emotion
+        const talkingAnimations = ['speak-emotion/Sena_Saotome_talk01_e16.bvh', 'speak-emotion/Sena_Saotome_talk02_e05.bvh', 
+                                    'speak-emotion/Sena_Saotome_talk03_e03.bvh', 'speak-emotion/Sena_Saotome_talk04_e03.bvh', 
+                                    'speak-emotion/Sena_Saotome_talk05_e01.bvh'];
+        const waitingAnimations = ['waiting-emotion/Sena_Saotome_idle01_e06.bvh', 'waiting-emotion/Sena_Saotome_idle02_e08.bvh', 
+                                    'cute-emotion/Sena_Saotome_Accent01_e11.bvh'];
+        // const cuteAnimations = ['cute-emotion/Sena_Saotome_Accent01_e11.bvh', 'cute-emotion/Sena_Saotome_Approach01_e01.bvh'];
+
+        let emotionSwitchInterval;
+
+        // Function to get a random animation (for both talking and waiting emotions)
+        function getRandomAnimation(animations) {
+            const randomIndex = Math.floor(Math.random() * animations.length);
+            return animations[randomIndex];
+        }
+
+        // Function to apply talking emotion
+        function applyTalkingEmotion() {
+            if (currentVrm) {
+                const randomTalkingAnimation = getRandomAnimation(talkingAnimations);
+                applyAnimation(randomTalkingAnimation, 'talking');
+                console.log(`Applied talking emotion: ${randomTalkingAnimation}`);
+            }
+        }
+
+        // Function to apply waiting emotion
+        function applyWaitingEmotion() {
+            if (currentVrm) {
+                const randomWaitingAnimation = getRandomAnimation(waitingAnimations);
+                applyAnimation(randomWaitingAnimation, 'waiting');
+                console.log(`Applied waiting emotion: ${randomWaitingAnimation}`);
+            }
+        }
+
+        // Function to switch between emotions dynamically during speech
+        function switchEmotionsDuringSpeech() {
+            emotionSwitchInterval = setInterval(() => {
+                applyTalkingEmotion();  // Randomly switch to a different talking emotion
+            }, 3000); // Switch emotions every 3 seconds (adjust this interval as needed)
+        }
+
+        // Function to switch between emotions dynamically during waiting
+        function switchEmotionsDuringWaiting() {
+            emotionSwitchInterval = setInterval(() => {
+                applyWaitingEmotion();  // Randomly switch to a different waiting emotion
+            }, 5000); // Switch emotions every 5 seconds (adjust this interval as needed)
+        }
+
+        // Call this to start switching emotions during waiting/idle phase
+        function startIdleWaiting() {
+            switchEmotionsDuringWaiting();  // Start the waiting emotion switching
+        }
+
+
+        // function applyCuteEmotion() {
+        //     if (currentVrm) {
+        //         const randomCuteAnimation = getRandomAnimation(cuteAnimations);
+        //         applyAnimation(randomCuteAnimation, 'cute');
+        //         console.log(`Applied cute emotion: ${randomCuteAnimation}`);
+        //     }
+        // }
+
+
+
+        // Function to load the VRM model
         loadVrm();
         function loadVrm() {
 
@@ -499,7 +757,7 @@
             });
 
             loader.load(
-                `/models/Sena_Saotome.vrm`,
+                `models/L001_cos01.vrm`,
                 (gltf) => {
                     const vrm = gltf.userData.vrm;
                     VRMUtils.removeUnnecessaryVertices(gltf.scene);
@@ -510,23 +768,134 @@
                     scene.add(vrm.scene);
                     currentVrm = vrm;
 
-                    vrm.scene.position.set(0.5, -1.1, 1);
+                    vrm.scene.position.set(0.015, -1.85, 0.2); // Keep the same position
                     vrm.scene.rotation.y = 0;
-                    vrm.scene.scale.set(2.3, 2, 2.3);
+                    vrm.scene.rotation.x = Math.PI / 36;
+                    vrm.scene.scale.set(4.5, 2.3, 4.5); // Further increase the X and Z axes scale to widen the face more
+
+
+
+
+
 
                     joinSpringManager = vrm.springBoneManager;
 
                     if (currentVrm) {
-                        applyAnimation('/bvh/talking1.bvh', 'waiting');
+                        applyWaitingEmotion();
+                        
                     }
-                    setTimeout(() => {
-                        console.log('success');
-                    }, 3000);
+                      // Adjust the delay if needed
+                    // setTimeout(() => {
+                    //     console.log('success');
+                    // }, 3000);
                 },
                 (progress) => { },
                 (error) => console.error(error)
             );
         }
+        
+
+        // Function to simulate mouth movement when speaking
+        function simulateSpeaking() {
+            if (!currentVrm || !currentVrm.expressionManager) {
+                console.error("VRM or expression manager is not loaded.");
+                return;
+            }
+
+            
+
+            const vowelExpressions = ['aa', 'ih', 'ee', 'ou', 'oh'];
+            let currentExpressionIndex = 0;
+            let intensity = 0;
+            let intensityDirection = 1;
+
+            const updateExpression = () => {
+                if (!isSpeaking) return; // Stop updating if speaking has stopped
+
+                // Reset all expressions
+                Object.keys(currentVrm.expressionManager.expressions).forEach(expressionName => {
+                    currentVrm.expressionManager.setValue(expressionName, 0);
+                });
+
+                // Update the intensity of the current expression
+                const currentExpression = vowelExpressions[currentExpressionIndex];
+                intensity += 0.15 * intensityDirection;
+
+                // Check intensity bounds and adjust direction if necessary
+                if (intensity >= 1 || intensity <= 0) {
+                    intensityDirection *= -1;
+                    intensity = Math.max(0, Math.min(1, intensity)); // Clamp intensity between 0 and 1
+                }
+
+                // Set the current expression
+                currentVrm.expressionManager.setValue(currentExpression, intensity);
+
+                // Change expression when intensity closes
+                if (intensity <= 0) {
+                    currentExpressionIndex = (currentExpressionIndex + 1) % vowelExpressions.length;
+                }
+
+                // Continue the loop
+                setTimeout(updateExpression, 10); // Faster timing for more natural movement
+            };
+
+            isSpeaking = true; // Set speaking flag to true
+            updateExpression();
+        }
+
+        function stopMouthAnimation() {
+            isSpeaking = false;
+
+            // Ensure all mouth-related expressions are reset to 0
+            if (currentVrm && currentVrm.expressionManager) {
+                const mouthExpressions = ['aa', 'ih', 'ee', 'ou', 'oh'];
+                mouthExpressions.forEach(expressionName => {
+                    currentVrm.expressionManager.setValue(expressionName, 0);
+                });
+                // After stopping, return to neutral emotion
+            }
+        }
+
+        
+
+        const emotions = {
+            happy: ['happy'],       // Single expression
+            relaxed: ['relaxed'],   // Single expression
+            neutral: ['neutral'],   // Single expression
+            angry: ['angry'],       // Single expression
+            sad: ['sad']            // Single expression
+        };
+
+        
+
+        
+
+        function applyEmotion(emotion) {
+            if (!currentVrm || !currentVrm.expressionManager) {
+                console.error("VRM or expression manager is not loaded.");
+                return;
+            }
+
+            // Reset all expressions first
+            Object.keys(currentVrm.expressionManager.expressions).forEach(expressionName => {
+                currentVrm.expressionManager.setValue(expressionName, 0);
+            });
+
+            
+            // Apply other emotions without mouth adjustment
+            if (emotions[emotion]) {
+                emotions[emotion].forEach(expressionName => {
+                    currentVrm.expressionManager.setValue(expressionName, 1);
+                });
+                console.log(`Applying emotion: ${emotion}`);
+            } else {
+                console.error(`Emotion ${emotion} not found.`);
+            }
+            
+        }
+
+
+
 
         let isProcessed = true;
         let lastTimeUpdateMotion = 0;
@@ -544,9 +913,7 @@
             currentVrm.currentAction = null;
             currentVrm.pendingAnimation = null;
             if (currentVrm.currentBvhFilePath === bvhFilePath) return;
-            console.log(currentVrm.currentBvhFilePath);
             if (mapAction.get(bvhFilePath)) {
-                console.log('haveFile');
                 if (!mixer) {
                     mixer = new THREE.AnimationMixer(currentVrm.scene);
                     currentVrm.mixer = mixer;
@@ -558,8 +925,6 @@
                 }
                 synchronizeCrossFade(bvhFilePath, 1, currentVrm);
             } else {
-                console.log('Dont`t haveFile');
-
                 currentVrm.loading = true;
                 const loader1 = new BVHLoader();
                 loader1.load(bvhFilePath, function (result) {
@@ -715,58 +1080,6 @@
 
         }
     
-    </script>
-    <script>
-        // const commentBox = document.getElementById('comment-content');
-        // const maxVisibleComments = 6; // Maximum number of visible comments
-
-
-        // function addCommentToBox(commentText) {
-        //     const comment = document.createElement('div');
-        //     comment.className = 'comment';
-        //     comment.textContent = commentText;
-    
-        //     // Add the new comment at the end
-        //     commentBox.appendChild(comment);
-    
-        //     // Remove the oldest comment if the total exceeds maxVisibleComments
-        //     const comments = commentBox.querySelectorAll('.comment');
-        //     if (comments.length > maxVisibleComments) {
-        //         commentBox.removeChild(comments[0]); // Remove the oldest comment (first in the list)
-        //     }
-        // }
-    
-        // // Initialize EventSource for real-time comments
-        // function initializeCommentStream() {
-        //     const eventSource = new EventSource('http://localhost:8000/stream-comments-only');
-
-        //     eventSource.onmessage = function(event) {
-        //         try {
-        //             // Replace single quotes with double quotes to handle JSON format
-        //             let formattedData = event.data.replace(/'/g, '"');
-
-        //             // Parse the JSON data
-        //             const commentData = JSON.parse(formattedData);
-
-        //             // Extract author and message
-        //             const author = commentData.author || 'Anonymous';
-        //             const message = commentData.message || '';
-
-        //             // Add formatted comment to the box
-        //             addCommentToBox(`${author}: ${message}`);
-        //         } catch (error) {
-        //             console.error('Error processing comment data:', error);
-        //         }
-        //     };
-
-        //     eventSource.onerror = function(event) {
-        //         console.error('Error occurred:', event);
-        //         eventSource.close();
-        //     };
-        // }
-
-    
-        // initializeCommentStream();
     </script>
     
 </body>
