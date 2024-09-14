@@ -3,7 +3,6 @@ import time
 
 # Replace with your own API key
 API_KEY = "AIzaSyCp7i5IHB5dlBTM3Nz3cysqRPEq9czhv0Y"
-VIDEO_ID = "fyoGZeq34Yc"  # Replace with the video ID of your live stream
 
 # Function to get liveChatId from the video ID
 def get_live_chat_id(api_key, video_id):
