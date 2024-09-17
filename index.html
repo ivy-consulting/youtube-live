@@ -432,10 +432,16 @@
 
             console.log(`Chatbot response for ${author}: ${chatbotResponse.text}`);
 
+            let finalComment = message;
+            if (author != 'Chatbot') {
+                const chatbotResponse = await getChatbotResponse(message, author, 1);
+                finalComment  = chatbotResponse.text;
+            }
+
             try {
                 // Generate speech for the comment
                 
-                const { audioData, duration } = await generateSpeech(chatbotResponse.text);
+                const { audioData, duration } = await generateSpeech(finalComment);
 
 
                 if (audioData) {
