@@ -308,7 +308,7 @@
                 console.log(`New messages in the queue, processing messages... ${unreadMessageQueue}`);
             } else if (!isPlaying) {
                 console.log('Queue is empty, fetching idle message...');
-                const idleComment = "";  // Identifier for idle messages
+                const idleComment = "ライブの視聴者にランダムな話題を提供してください/話してください。";  // Identifier for idle messages
                 const username = "";     // Default username for idle mode
 
                 try {
@@ -398,7 +398,7 @@
 
                 } else if (response.status === 405) {
                     console.log("Method not allowed, retrying in 60 seconds...");
-                    setTimeout(() => generateSpeech(text), 60000); // Retry after 60 seconds
+                    setTimeout(() => generateSpeech(text), 50000); // Retry after 60 seconds
                 } else {
                     console.error("An unexpected error occurred:", response.statusText);
                     return { audioData: null, duration: 0 }; // Return 0 sec duration on failure
@@ -420,7 +420,7 @@
 
             if (unreadMessageQueue.length === 0) {
                 console.log('No unread messages, checking again in 10 seconds');
-                setTimeout(playAudio, 10000); // Retry checking after 10 seconds if there are no unread messages
+                setTimeout(playAudio, 5000); // Retry checking after 5 seconds if there are no unread messages
                 return;
             }
 
@@ -428,9 +428,15 @@
             const { author, message, status } = unreadMessageQueue.shift();
             console.log(`Processing message from: ${author}, status: ${status}`);
 
+            const chatbotResponse = await getChatbotResponse(message, author, 1);
+
+            console.log(`Chatbot response for ${author}: ${chatbotResponse.text}`);
+
             try {
                 // Generate speech for the comment
-                const { audioData, duration } = await generateSpeech(message);
+                
+                const { audioData, duration } = await generateSpeech(chatbotResponse.text);
+
 
                 if (audioData) {
                     isPlaying = true;
